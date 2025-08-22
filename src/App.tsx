@@ -12,6 +12,7 @@ import Forecast from "./pages/Forecast";
 import Recommendations from "./pages/Recommendations";
 import Alerts from "./pages/Alerts";
 import NotFound from "./pages/NotFound";
+import Chatbot from "./components/Chatbot"; // <-- Make sure this import is present
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,8 @@ const App = () => {
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          {/* Shipmate Chatbot floats above all pages */}
+          <Chatbot />
           <div className="min-h-screen bg-background">
             <Navigation />
             <Routes>
@@ -40,7 +43,6 @@ const App = () => {
               <Route path="/forecast" element={<Forecast />} />
               <Route path="/recommendations" element={<Recommendations />} />
               <Route path="/alerts" element={<Alerts />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </div>

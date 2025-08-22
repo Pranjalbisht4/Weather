@@ -10,7 +10,7 @@ import io
 import matplotlib
 matplotlib.use("Agg")  # headless rendering
 import matplotlib.pyplot as plt
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict, Counter
 from config import (
     OPENWEATHER_API_KEY,
@@ -29,7 +29,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 ALERTS_CSV = os.path.join(DATA_DIR, "alerts.csv")
 RECS_CSV = os.path.join(DATA_DIR, "recommendations.csv")
 CHAT_CSV = os.path.join(DATA_DIR, "expert_chat.csv")
-HISTORICAL_CSV = os.path.join(DATA_DIR, "historical_weather.csv")  # you already had this
+HISTORICAL_CSV = os.path.join(DATA_DIR, "historical_weather.csv")
 
 def ensure_csv(path: str, headers: list[str], sample_rows: list[list] | None = None):
     if not os.path.exists(path):
@@ -45,6 +45,7 @@ ensure_csv(
         [3, "Fog advisory – North Sea", "Low", 0],
     ],
 )
+
 ensure_csv(
     RECS_CSV,
     ["condition", "rule", "advice", "severity"],
@@ -54,6 +55,7 @@ ensure_csv(
         ["visibility<2", "Visibility below 2km", "Use radar/ais and slow down.", "Medium"],
     ],
 )
+
 ensure_csv(
     CHAT_CSV,
     ["timestamp", "user_message", "assistant_response"],
@@ -80,6 +82,7 @@ def weather_coords():
     lon = request.args.get("lon")
     if not lat or not lon:
         return jsonify({"error": "Latitude and Longitude required"}), 400
+
     params = {
         "lat": lat,
         "lon": lon,
@@ -96,7 +99,9 @@ def forecast():
     lat = request.args.get("lat")
     lon = request.args.get("lon")
     city = request.args.get("city")
+
     params = {"appid": OPENWEATHER_API_KEY, "units": "metric"}
+
     if city:
         params["q"] = city
         r = requests.get(OPENWEATHER_FORECAST, params=params, timeout=20)
@@ -106,6 +111,7 @@ def forecast():
         r = requests.get(OPENWEATHER_FORECAST, params=params, timeout=20)
     else:
         return jsonify({"error": "Provide city or lat/lon"}), 400
+
     return jsonify(r.json()), r.status_code
 
 # ---------- Marine (OneCall passthrough) ----------
@@ -115,6 +121,7 @@ def marine():
     lon = request.args.get("lon")
     if not lat or not lon:
         return jsonify({"error": "Latitude and Longitude required"}), 400
+
     params = {"lat": lat, "lon": lon, "appid": OPENWEATHER_API_KEY, "units": "metric", "exclude": "minutely"}
     r = requests.get(OPENWEATHER_ONECALL, params=params, timeout=20)
     return jsonify(r.json()), r.status_code
@@ -124,20 +131,17 @@ def marine():
 def historical_weather():
     if not os.path.exists(HISTORICAL_CSV):
         return jsonify([])  # no file yet
+
     city = request.args.get("city")
     df = pd.read_csv(HISTORICAL_CSV)
     if city and "city" in df.columns:
         df = df[df["city"].str.lower() == city.lower()]
+
     return jsonify(df.to_dict(orient="records"))
 
 # ---------- Export map (PNG) ----------
 @app.route("/api/map/export", methods=["GET"])
 def export_map():
-    """
-    Optional query params:
-    - title: custom title
-    - lat, lon: annotate a point
-    """
     title = request.args.get("title", "Exported Map")
     lat = request.args.get("lat")
     lon = request.args.get("lon")
@@ -168,11 +172,7 @@ def export_map():
 # ---------- Recommendations ----------
 @app.route("/api/recommendations", methods=["GET"])
 def recommendations():
-    """
-    Uses simple rule-based logic + CSV rules. Optionally accepts:
-    - wind (knots), wave (m), visibility (km)
-    """
-    wind = float(request.args.get("wind", 12))       # demo defaults
+    wind = float(request.args.get("wind", 12))  # demo defaults
     wave = float(request.args.get("wave", 1.2))
     visibility = float(request.args.get("visibility", 10))
 
@@ -235,10 +235,11 @@ def alert_preferences():
 def expert():
     data = request.get_json(force=True, silent=True) or {}
     user_msg = (data.get("message") or "").strip()
+
     if not user_msg:
         return jsonify({"response": "Please provide a message."}), 400
 
-    # Very simple deterministic “expert”
+    # Very simple deterministic "expert"
     user_lower = user_msg.lower()
     if "route" in user_lower or "course" in user_lower:
         resp = "Consider a coastal route with shelter options. Check wind forecasts every 6 hours."
@@ -262,10 +263,6 @@ def expert():
 # ---------- Enhancement Plan ----------
 @app.route("/api/enhancement", methods=["POST"])
 def enhancement():
-    """
-    Expects JSON like:
-    { "wind": 15, "wave": 2.5, "visibility": 8 }
-    """
     data = request.json or {}
     result = generate_plan(data)
     return jsonify(result)
@@ -273,9 +270,6 @@ def enhancement():
 # ---------- Component Analysis ----------
 @app.route("/api/analysis", methods=["POST"])
 def analysis():
-    """
-    Expects JSON dataset (e.g., forecast or marine data).
-    """
     data = request.json or {}
     result = analyze_components(data)
     return jsonify(result)
@@ -283,13 +277,8 @@ def analysis():
 # ---------- Weather Graph ----------
 @app.route("/api/graph", methods=["POST"])
 def graph():
-    """
-    Expects JSON like:
-    { "city": "London", "temps": [20,21,19,18], "times": ["10:00","13:00","16:00","19:00"] }
-    """
     data = request.json or {}
     img = create_weather_graph(data)
-
     return send_file(
         img,
         mimetype="image/png",
@@ -298,8 +287,9 @@ def graph():
     )
 
 # ================================
-# 🚀 NEW: 10-Day Forecast Endpoint
+# 🚀 UPDATED: 10-Day Forecast Endpoint
 # ================================
+
 def resolve_coords_for_city(city: str):
     """Resolve city -> (lat, lon, name/country) using current weather endpoint."""
     params = {"q": city, "appid": OPENWEATHER_API_KEY, "units": "metric"}
@@ -337,6 +327,7 @@ def aggregate_3h_to_daily(list3h):
         conds = [e["weather"][0]["main"] for e in entries if e.get("weather")]
         descs = [e["weather"][0]["description"] for e in entries if e.get("weather")]
         icons = [e["weather"][0]["icon"] for e in entries if e.get("weather")]
+
         cond = Counter(conds).most_common(1)[0][0] if conds else "Clear"
         desc = Counter(descs).most_common(1)[0][0] if descs else "clear sky"
         icon = Counter(icons).most_common(1)[0][0] if icons else "01d"
@@ -359,18 +350,58 @@ def aggregate_3h_to_daily(list3h):
             "clouds": round(sum(clouds)/len(clouds)) if clouds else 20,
             "icon": icon,
             "windDirection": round(sum(wind_deg)/len(wind_deg)) if wind_deg else 0,
-            "source": "3h-aggregate"
+            "source": "api-data"
         })
+
     return daily
+
+def generate_estimated_days(last_real_day, num_days=5):
+    """Generate estimated weather data for days 6-10 based on the last real day"""
+    estimated_days = []
+    base_date = datetime.fromisoformat(last_real_day["date"])
+
+    for i in range(1, num_days + 1):
+        new_date = base_date + timedelta(days=i)
+
+        # Create slight variations based on last real day
+        temp_variation = (-2 + (i % 3)) # Slight temperature variation
+        wind_variation = (-3 + (i % 4)) # Slight wind variation  
+        wave_variation = round((-0.3 + (i % 3) * 0.2), 1) # Slight wave variation
+
+        # Ensure reasonable bounds
+        new_temp = max(-10, min(45, last_real_day["temp"] + temp_variation))
+        new_wind = max(5, min(35, last_real_day["wind"] + wind_variation))
+        new_waves = max(0.5, min(6.0, last_real_day["waves"] + wave_variation))
+
+        # Vary conditions slightly
+        conditions = ["Clear", "Partly Cloudy", "Cloudy", "Light Rain"]
+        condition_idx = (i + hash(last_real_day["condition"])) % len(conditions)
+        new_condition = conditions[condition_idx]
+
+        estimated_days.append({
+            "day": f"Day {5 + i}",
+            "date": new_date.date().isoformat(),
+            "wind": new_wind,
+            "waves": new_waves,
+            "temp": new_temp,
+            "condition": new_condition,
+            "description": new_condition.lower(),
+            "humidity": max(30, min(90, last_real_day["humidity"] + (-10 + i * 3))),
+            "pressure": max(980, min(1030, last_real_day["pressure"] + (-5 + i * 2))),
+            "visibility": f"{max(3.0, min(10.0, float(last_real_day['visibility']) + (-1 + i * 0.3))):.1f}",
+            "clouds": max(10, min(90, last_real_day["clouds"] + (-20 + i * 8))),
+            "icon": "02d" if "cloudy" in new_condition.lower() else "01d",
+            "windDirection": (last_real_day["windDirection"] + i * 15) % 360,
+            "source": "estimated"
+        })
+
+    return estimated_days
 
 @app.route("/api/forecast10", methods=["GET"])
 def forecast10():
     """
-    Returns exactly 10 days. Priority:
-      1) OneCall 'daily' (typically up to 7-8 days)
-      2) Extend with aggregated 3h forecast (5 days)
-      3) If still <10, extrapolate last day trend
-    Query: ?city=London  OR  ?lat=..&lon=..
+    Returns exactly 10 days with a mix of real API data (first 5 days) 
+    and estimated data (days 6-10) based on patterns from real data.
     """
     city = request.args.get("city")
     lat = request.args.get("lat")
@@ -383,82 +414,42 @@ def forecast10():
             resolved_name = city or "Selected location"
             country = ""
 
-        # 1) OneCall daily
-        oc_params = {
-            "lat": lat,
-            "lon": lon,
-            "appid": OPENWEATHER_API_KEY,
-            "units": "metric",
-            "exclude": "minutely,hourly,alerts"
-        }
-        oc_r = requests.get(OPENWEATHER_ONECALL, params=oc_params, timeout=20)
-        oc_r.raise_for_status()
-        oc = oc_r.json()
-        days = []
-        for d in oc.get("daily", []):
-            # daily visibility not provided -> estimate to 10km baseline
-            wind_knots = round(d.get("wind_speed", 4.0) * 1.94384)
-            waves = round((d.get("wind_speed", 4.0) * 0.3 + 0.8), 1)
-            w = d.get("weather", [{"main": "Clear", "description":"clear sky", "icon":"01d"}])[0]
-            days.append({
-                "day": "",
-                "date": datetime.fromtimestamp(d["dt"]).date().isoformat(),
-                "wind": wind_knots,
-                "waves": waves,
-                "temp": round(d.get("temp", {}).get("day", 22)),
-                "condition": w.get("main", "Clear"),
-                "description": w.get("description", "clear sky"),
-                "humidity": d.get("humidity", 60),
-                "pressure": d.get("pressure", 1013),
-                "visibility": "10.0",
-                "clouds": d.get("clouds", 20),
-                "icon": w.get("icon", "01d"),
-                "windDirection": d.get("wind_deg", 0),
-                "source": "onecall-daily"
-            })
+        # Get 5-day forecast data (this is what the free API supports)
+        fc_params = {"appid": OPENWEATHER_API_KEY, "units": "metric"}
+        if city:
+            fc_params["q"] = city
+        else:
+            fc_params["lat"] = lat
+            fc_params["lon"] = lon
 
-        # 2) If we have fewer than 10, use 3h/5d forecast aggregates to extend
-        if len(days) < 10:
-            fc_params = {"appid": OPENWEATHER_API_KEY, "units": "metric"}
-            if city:
-                fc_params["q"] = city
-            else:
-                fc_params["lat"] = lat
-                fc_params["lon"] = lon
-            fc_r = requests.get(OPENWEATHER_FORECAST, params=fc_params, timeout=20)
-            if fc_r.ok:
-                fc = fc_r.json()
-                agg = aggregate_3h_to_daily(fc.get("list", []))
-                # Only append missing calendar days after last OneCall day
-                existing_dates = {d["date"] for d in days}
-                for a in agg:
-                    if a["date"] not in existing_dates:
-                        days.append(a)
-                        existing_dates.add(a["date"])
-                    if len(days) >= 10:
-                        break
+        fc_r = requests.get(OPENWEATHER_FORECAST, params=fc_params, timeout=20)
+        fc_r.raise_for_status()
+        fc = fc_r.json()
 
-        # 3) If still <10, extrapolate last known trend
-        while len(days) < 10 and len(days) > 0:
-            prev = days[-1]
-            synthetic_dt = datetime.fromisoformat(prev["date"]) + pd.Timedelta(days=1)
-            new_day = {
-                **prev,
-                "date": synthetic_dt.date().isoformat(),
-                "temp": max(-10, min(45, prev["temp"] + 0)),        # keep temp stable
-                "wind": max(0, prev["wind"] + (1 if len(days) % 2 == 0 else -1)),
-                "waves": max(0.5, round(prev["waves"] + (0.1 if len(days) % 2 == 0 else -0.1), 1)),
-                "source": "extrapolated"
-            }
-            days.append(new_day)
+        # Convert 3-hourly data to daily aggregates (gets us ~5 days)
+        days = aggregate_3h_to_daily(fc.get("list", []))
 
-        # Final: ensure exactly 10 and add friendly labels
+        # Ensure we have at least 1 day of real data
+        if not days:
+            raise Exception("No forecast data available")
+
+        # Take first 5 days of real data (or however many we got)
+        real_days = days[:5]
+
+        # Generate estimated data for remaining days to make total 10
+        if len(real_days) > 0:
+            estimated_days = generate_estimated_days(real_days[-1], 10 - len(real_days))
+            days = real_days + estimated_days
+
+        # Ensure exactly 10 days
         days = days[:10]
+
+        # Add friendly labels
         for i, d in enumerate(days):
             if i == 0:
                 d["day"] = "Today"
             elif i == 1:
-                d["day"] = "Tomorrow"
+                d["day"] = "Tomorrow"  
             else:
                 d["day"] = f"Day {i+1}"
 
@@ -469,12 +460,187 @@ def forecast10():
                 "lat": float(lat),
                 "lon": float(lon)
             },
-            "days": days
+            "days": days,
+            "data_info": {
+                "real_days": len(real_days),
+                "estimated_days": len(days) - len(real_days),
+                "note": f"First {len(real_days)} days from weather API, remaining days are estimates based on current trends"
+            }
         })
+
     except requests.HTTPError as e:
-        return jsonify({"error": "Upstream API error", "detail": str(e)}), 502
+        return jsonify({"error": "Weather service unavailable", "detail": str(e)}), 502
     except Exception as e:
-        return jsonify({"error": "Server error", "detail": str(e)}), 500
+        return jsonify({"error": "Unable to fetch forecast", "detail": str(e)}), 500
+
+# ---------- chatbot (original) ----------
+
+OCEAN_COORDS = {
+    "pacific ocean": (0, -160),
+    "atlantic ocean": (0, -30),
+    "indian ocean": (-20, 80),
+    "arctic ocean": (80, 0),
+    "southern ocean": (-60, 0),
+    "north atlantic": (40, -40),
+    "south atlantic": (-30, -20),
+    "north pacific": (40, -160),
+    "south pacific": (-30, -140),
+    "mediterranean sea": (35, 18),
+    "bay of bengal": (15, 90),
+    "arabian sea": (15, 65),
+    "caribbean sea": (15, -75),
+    "bering sea": (60, -175),
+    "gulf of mexico": (25, -90),
+}
+
+@app.route("/api/chatbot", methods=["POST"])
+def chatbot():
+    """
+    Shipmate: Maritime AI Chatbot
+    Accepts simple grammar, answers about weather, alerts, recommendations, historical data, and ocean/sea conditions.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    user_msg = (data.get("message") or "").strip().lower()
+    if not user_msg:
+        return jsonify({"response": "Shipmate: Please type your question."}), 400
+
+    import re
+
+    # 1. Ocean/sea queries (waves, wind, weather)
+    for ocean, (lat, lon) in OCEAN_COORDS.items():
+        if ocean in user_msg:
+            params = {
+                "lat": lat,
+                "lon": lon,
+                "appid": OPENWEATHER_API_KEY,
+                "units": "metric",
+                "exclude": "minutely"
+            }
+            r = requests.get(OPENWEATHER_ONECALL, params=params, timeout=20)
+            if r.ok:
+                j = r.json()
+                current = j.get("current", {})
+                wind_ms = current.get("wind_speed", 4.0)
+                wind_knots = round(wind_ms * 1.94384)
+                waves = round((wind_ms * 0.3 + 0.8), 1)
+                cond = current.get("weather", [{"description": "clear sky"}])[0]["description"]
+                resp = (
+                    f"Shipmate: {ocean.title()} conditions:\n"
+                    f"- Wind: {wind_knots} knots\n"
+                    f"- Waves: {waves} meters\n"
+                    f"- Weather: {cond}\n"
+                    f"- Location: ({lat}, {lon})"
+                )
+            else:
+                resp = f"Shipmate: Sorry, I couldn't fetch data for the {ocean.title()}."
+            return jsonify({"response": resp})
+
+    # 2. Weather by city or coordinates
+    if "weather" in user_msg or "forecast" in user_msg:
+        match = re.search(r"(?:in|at)\s+([a-zA-Z\s]+)", user_msg)
+        city = match.group(1).strip().title() if match else None
+        if city:
+            params = {"q": city, "appid": OPENWEATHER_API_KEY, "units": "metric"}
+            r = requests.get(OPENWEATHER_CURRENT, params=params, timeout=20)
+            if r.ok:
+                j = r.json()
+                temp = j["main"]["temp"]
+                cond = j["weather"][0]["description"]
+                resp = f"Shipmate: The weather in {city} is {temp}°C with {cond}."
+            else:
+                resp = f"Shipmate: Sorry, I couldn't fetch weather for {city}."
+            return jsonify({"response": resp})
+        match = re.search(r"([-+]?\d{1,2}\.\d+)[, ]+\s*([-+]?\d{1,3}\.\d+)", user_msg)
+        if match:
+            lat, lon = match.groups()
+            params = {"lat": lat, "lon": lon, "appid": OPENWEATHER_API_KEY, "units": "metric"}
+            r = requests.get(OPENWEATHER_CURRENT, params=params, timeout=20)
+            if r.ok:
+                j = r.json()
+                temp = j["main"]["temp"]
+                cond = j["weather"][0]["description"]
+                resp = f"Shipmate: The weather at ({lat}, {lon}) is {temp}°C with {cond}."
+            else:
+                resp = f"Shipmate: Sorry, I couldn't fetch weather for those coordinates."
+            return jsonify({"response": resp})
+
+    # 3. Alerts
+    if "alert" in user_msg or "warning" in user_msg:
+        df = pd.read_csv(ALERTS_CSV)
+        active = df[df["acknowledged"] == 0]
+        if not active.empty:
+            alerts = "; ".join(active["message"])
+            resp = f"Shipmate: Current alerts - {alerts}"
+        else:
+            resp = "Shipmate: No active alerts at the moment."
+        return jsonify({"response": resp})
+
+    # 4. Recommendations (contextual for oceans if possible)
+    if "recommend" in user_msg or "advice" in user_msg:
+        # If ocean/sea mentioned, fetch conditions and give advice
+        for ocean, (lat, lon) in OCEAN_COORDS.items():
+            if ocean in user_msg:
+                params = {
+                    "lat": lat,
+                    "lon": lon,
+                    "appid": OPENWEATHER_API_KEY,
+                    "units": "metric",
+                    "exclude": "minutely"
+                }
+                r = requests.get(OPENWEATHER_ONECALL, params=params, timeout=20)
+                if r.ok:
+                    j = r.json()
+                    current = j.get("current", {})
+                    wind_ms = current.get("wind_speed", 4.0)
+                    wind_knots = round(wind_ms * 1.94384)
+                    waves = round((wind_ms * 0.3 + 0.8), 1)
+                    advice = []
+                    df = pd.read_csv(RECS_CSV)
+                    if wind_knots > 20:
+                        advice.append(df[df["condition"] == "wind>20"].iloc[0]["advice"])
+                    if waves > 3:
+                        advice.append(df[df["condition"] == "wave>3"].iloc[0]["advice"])
+                    resp = (
+                        f"Shipmate: Recommendations for {ocean.title()}:\n"
+                        + ("\n- " + "\n- ".join(advice) if advice else "Conditions are safe for navigation.")
+                    )
+                else:
+                    resp = f"Shipmate: Sorry, I couldn't fetch recommendations for the {ocean.title()}."
+                return jsonify({"response": resp})
+        # Otherwise, general advice
+        df = pd.read_csv(RECS_CSV)
+        advices = "; ".join(df["advice"])
+        resp = f"Shipmate: Recommendations - {advices}"
+        return jsonify({"response": resp})
+
+    # 5. Historical data
+    if "history" in user_msg or "historical" in user_msg:
+        df = pd.read_csv(HISTORICAL_CSV)
+        recent = df.tail(3)
+        resp = "Shipmate: Recent historical weather:\n"
+        for _, row in recent.iterrows():
+            resp += f"{row['date']}: {row.get('location', row.get('city', ''))} - {row['condition']} ({row['value']})\n"
+        return jsonify({"response": resp})
+
+    # 6. Help or fallback
+    if "help" in user_msg or "what can you do" in user_msg:
+        resp = (
+            "Shipmate: I can provide:\n"
+            "- Weather for any city, coordinates, or major ocean/sea\n"
+            "- Wind and wave conditions for oceans\n"
+            "- Current maritime alerts\n"
+            "- Recommendations for safe navigation\n"
+            "- Historical weather data\n"
+            "Try: 'weather in Pacific Ocean', 'waves in Bay of Bengal', 'recommendations for North Atlantic', 'show alerts', 'history'."
+        )
+        return jsonify({"response": resp})
+
+    # 7. Default fallback
+    resp = (
+        "Shipmate: Sorry, I didn't understand. Try asking about weather, wind, waves, alerts, recommendations, or history.\n"
+        "For example: 'weather in Pacific Ocean', 'waves in Bay of Bengal', 'recommendations for North Atlantic', 'show alerts', 'history'."
+    )
+    return jsonify({"response": resp})
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
